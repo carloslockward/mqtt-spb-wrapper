@@ -552,7 +552,7 @@ class SpbEntity:
         # Data
         if not self.data.is_empty():
             for item in self.data.values():
-                name = "DATA/" + item.name
+                name = item.name
                 # If multiple values send it as DataSet
                 if not item.is_single_value():
                     addMetricDataset_from_dict(payload, name=name, alias=None,
@@ -634,8 +634,7 @@ class SpbEntity:
                         else:
                             self.commands.set_value(field['name'], field['value'], field['timestamp'])  # update field
 
-                elif field['name'].startswith("DATA/"):
-                    field['name'] = field['name'][5:]
+                else:
                     if field.get("value"):
                         # Check if multiple values are being send as DataSet or Metric
                         if "datasetValue" in field.keys():
