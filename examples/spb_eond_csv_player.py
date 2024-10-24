@@ -1,5 +1,5 @@
 import yaml
-import pandas as pd
+import csv
 import time
 from mqtt_spb_wrapper import *
 
@@ -27,13 +27,19 @@ device = MqttSpbEntityDevice(spb_domain_name=config['sparkplugb']['domain_name']
 
 # Load data from CSV file -----------------------------------------------------------------------
 print("Loading data")
-df = pd.read_csv ( config['data']['file'], delimiter=";")
+
+csv_data = []
+with open(config['data']['file'], newline='') as csvfile:
+    reader = csv.DictReader(csvfile, delimiter=';')
+    for row in reader:
+        csv_data.append(row)
+
 config_replay_interval = config['data']['replay_interval']
 print("Loading data - finished")
 
 # Remap spB device ATTR, DATA, CMD fields as specified in the config file -----------------------
 
-# MAP the telemetry fields - references to the CSV columns ( PD series )
+# MAP the telemetry fields - references to the CSV columns
 telemetry = {}
 for k in config['data']['data']:
     value = config['data']['data'][k]
@@ -43,25 +49,24 @@ for k in config['data']['data']:
     if isinstance(value, str) and "file." in value:
         try:
             field = value.split(".")[1]
-            ref = df[field]
-        except:
-            print("WARNING - Could not map telemetry field - %s : %s"%(k, value))
+            ref = [row[field] for row in csv_data]
+        except KeyError:
+            print(f"WARNING - Could not map telemetry field - {k} : {value}")
 
     telemetry[k] = ref  # Save the reference
 
-# MAP the attributes fields - static data - get data from CSV columns ( PD series )
+# MAP the attributes fields - static data - get data from CSV columns
 attributes = {}
 for k in config['data']['attributes']:
     value = config['data']['attributes'][k]
     ref = value
 
     if isinstance(value, str) and "file." in value:
-        # Map the CSV column to the telemetry field
         try:
             field = value.split(".")[1]
-            ref = df[field][0]
-        except:
-            print("WARNING - Could not map attribute field - %s : %s"%(k, value))
+            ref = csv_data[0][field]
+        except KeyError:
+            print(f"WARNING - Could not map attribute field - {k} : {value}")
 
     attributes[k] = ref  # Save the reference
 
@@ -72,43 +77,41 @@ for k in config['data']['commands']:
     ref = value
 
     if isinstance(value, str) and "file." in value:
-        # Map the CSV column to the telemetry field
         try:
             field = value.split(".")[1]
-            ref = df[field][0]
-        except:
-            print("WARNING - Could not map commands field - %s : %s"%(k, value))
+            ref = csv_data[0][field]
+        except KeyError:
+            print(f"WARNING - Could not map commands field - {k} : {value}")
 
     commands[k] = ref  # Save the reference
 
-# Fillout the device fields and console print values ---------------------------------------------------
+# Fill out the device fields and console print values -----------------------------------------------
 
 print("--- ATTRIBUTES")
 for k in attributes:
-    print("  %s - %s"%(k, str(attributes[k])))
+    print(f"  {k} - {attributes[k]}")
     device.attributes.set_value(k, attributes[k])
 
 print("--- COMMANDS")
 for k in commands:
-    print("  %s - %s"%(k, str(commands[k])))
+    print(f"  {k} - {commands[k]}")
     device.commands.set_value(k, commands[k])
 
 print("--- TELEMETRY")
-for k in telemetry.keys():
-    if isinstance(telemetry[k], pd.Series):
+for k in telemetry:
+    if isinstance(telemetry[k], list):
         value = telemetry[k][0]
     else:
         value = telemetry[k]
-    print("  %s - %s"%(k, str(value)))
+    print(f"  {k} - {value}")
     device.data.set_value(k, value)
-
 
 # Reply spB device data on the MQTT server ----------------------------------------------------------
 
 # Connect to the MQTT broker
 _connected = False
 while not _connected:
-    print("Connecting to data broker %s:%d ..." % (config['mqtt']['host'], config['mqtt']['port']))
+    print(f"Connecting to data broker {config['mqtt']['host']}:{config['mqtt']['port']} ...")
     _connected = device.connect(config['mqtt']['host'],
                                 config['mqtt']['port'],
                                 config['mqtt']['user'],
@@ -121,11 +124,10 @@ device.publish_birth()  # Send birth message
 
 # Iterate device data
 for i in range(100):
-
     # Update the field telemetry data
     for k in device.data.get_names():
         value = telemetry[k]
-        if isinstance(value, pd.Series):
+        if isinstance(value, list):
             device.data.set_value(k, value[i])
         else:
             device.data.set_value(k, value)
@@ -138,12 +140,12 @@ for i in range(100):
     for v in telemetry.values():
         if values != "":
             values += "; "
-        if isinstance(v, pd.Series):
-            values += str(v[i]) # Pandas Series
+        if isinstance(v, list):
+            values += str(v[i]) # From CSV list
         else:
             values += str(v)    # Static value
 
-    print("  %s"%( values ))
+    print(f"  {values}")
 
-    # Wait some time, reply time
+    # Wait some time, replay time
     time.sleep(config_replay_interval)
